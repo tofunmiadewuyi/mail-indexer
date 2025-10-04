@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -9,9 +10,17 @@ import (
 	"mail-indexer/parser"
 	"mail-indexer/scanner"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
+
+func ask(question string) string {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print(question)
+	answer, _ := reader.ReadString('\n')
+	return strings.TrimSpace(answer)
+}
 
 func main() {
 	account := flag.String("account", "", "cPanel account name")
@@ -20,7 +29,7 @@ func main() {
 	actualUser := flag.String("actual-user", "", "Actual email owner (optional, defaults to --user)")
 	before := flag.String("before", "2024-01-01", "Archive emails before this date (YYYY-MM-DD)")
 	stats := flag.Bool("stats", false, "Show date statistics without indexing")
-	delete := flag.Bool("delete", false, "Delete email after indexing succesfully")
+	// delete := flag.Bool("delete", false, "Delete email after indexing succesfully")
 
 	flag.Parse()
 
@@ -67,6 +76,23 @@ func main() {
 	}
 	fmt.Printf("Found %d email files\n", len(emailFiles))
 
+	userAction := "index"
+	if *stats {
+		userAction = "check stats for"
+	}
+	for {
+		proceedToIndex := ask(fmt.Sprintf("\nDo you want to proceed to %s %d emails? (y/n)\n: ", userAction, len(emailFiles)))
+
+		if proceedToIndex == "y" {
+			break
+		} else if proceedToIndex == "n" {
+			fmt.Println("---exit---")
+			return
+		}
+		// invalid input, loop continues and asks again
+		fmt.Println("Please answer y or n")
+	}
+
 	if *stats {
 		beforeYear := 0
 		afterYear := 0
@@ -98,7 +124,6 @@ func main() {
 	indexed := 0
 	skipped := 0
 	failed := 0
-	deleted := 0
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -142,17 +167,8 @@ func main() {
 
 				mu.Lock()
 				indexed++
-
-				if *delete {
-					if err := os.Remove(filePath); err != nil {
-						log.Printf("Warning: Failed to delete %s: %v", filePath, err)
-					} else {
-						deleted++
-					}
-				}
-
 				if indexed%100 == 0 {
-					fmt.Printf("Indexed: %d, Skipped: %d, Failed: %d\n", indexed, skipped, failed)
+					fmt.Printf("Indexed: %d, Skipped: %d, Failed: %d, Completed: %d%% \n", indexed, skipped, failed, (indexed+skipped+failed)/len(emailFiles))
 				}
 				mu.Unlock()
 			}
@@ -172,14 +188,49 @@ func main() {
 
 	elapsed := time.Since(startTime)
 
-	finalMsg := fmt.Sprintf("\nDone! Indexed: %d, Skipped: %d, Failed: %d in %s\n",
+	fmt.Printf("\nDone! Indexed: %d, Skipped: %d, Failed: %d in %s\n",
 		indexed, skipped, failed, elapsed.Round(time.Second))
 
-	if *delete {
-		finalMsg = fmt.Sprintf("\nDone! Indexed: %d, Skipped: %d, Failed: %d, Deleted %d in %s\n",
-			indexed, skipped, failed, deleted, elapsed.Round(time.Second))
+	for {
+		proceedToDelete := ask("\n Do you want to delete the indexed files?")
+		if proceedToDelete == "y" {
+			break
+		} else if proceedToDelete == "n" {
+			fmt.Println("---exit---")
+			return
+		}
+
+		fmt.Println("Please answer y or n")
 	}
 
-	fmt.Printf(finalMsg)
+	deleteFileChan := make(chan string, 100)
+	var deleteWg sync.WaitGroup
+	deleted := 0
 
+	for i := range numWorkers {
+		deleteWg.Add(1)
+		go func(workerID int) {
+			defer deleteWg.Done()
+			for filePath := range deleteFileChan {
+				if err := os.Remove(filePath); err != nil {
+					log.Printf("Worker %d: Failed to delete %s: %v", workerID, filePath, err)
+				} else {
+					mu.Lock()
+					deleted++
+					mu.Unlock()
+				}
+			}
+		}(i)
+	}
+
+	go func() {
+		for _, filePath := range emailFiles {
+			deleteFileChan <- filePath
+		}
+		close(deleteFileChan)
+	}()
+
+	fmt.Printf("Done deleting %d emails\n", deleted)
+	fmt.Println("Thanks for using Mail-Indexer by sevena")
+	fmt.Println("---exit---")
 }

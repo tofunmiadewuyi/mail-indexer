@@ -6,14 +6,15 @@ ex: ./mail-indexer --account westgate --domain westgate.ng --user duke --before 
 --delete // to delete the email after indexing
 
 
-# Count documents
-curl http://localhost:9200/mail-archive/_count
+## Count documents
+```curl http://localhost:9200/index_name/_count```
 
-# See a sample email
-curl http://localhost:9200/mail-archive/_search?size=1&pretty
+## See a sample email
+```curl http://localhost:9200/index_name/_search?size=1&pretty```
 
-# Search for emails containing "invoice"
-curl -X GET "localhost:9200/mail-archive/_search?pretty" -H 'Content-Type: application/json' -d'
+## Search for emails containing "invoice"
+```
+curl -X GET "localhost:9200/index_name/_search?pretty" -H 'Content-Type: application/json' -d'
 {
   "query": {
     "match": {
@@ -21,7 +22,42 @@ curl -X GET "localhost:9200/mail-archive/_search?pretty" -H 'Content-Type: appli
     }
   }
 }'
+```
+
+## Count emails for a user
+```
+curl -X GET "localhost:9200/index_name/_count?pretty" -H 'Content-Type: application/json' -d'
+{
+  "query": {
+    "term": {
+      "user": "username@domain.com"
+    }
+  }
+}
+'
+```
+
+## Get index size for that user
+```
+curl -X GET "localhost:9200/index_name/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+  "size": 0,
+  "query": {
+    "term": {
+      "user": "username@domain.com"
+    }
+  },
+  "aggs": {
+    "total_size": {
+      "sum": {
+        "field": "_size"
+      }
+    }
+  }
+}
+'
+```
 
 
 # Delete the index (wipes all data)
-curl -X DELETE "localhost:9200/mail-archive"
+```curl -X DELETE "localhost:9200/index_name"```
